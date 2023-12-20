@@ -1,4 +1,4 @@
-import { createrng, type RNG } from "./rng";
+import Prando from 'prando';
 
 export const T = 1;
 export const R = 2;
@@ -175,7 +175,7 @@ export function generate(options: MazeOptions): MazeData {
     const data = new Uint8Array(options.width * options.height);
     const start = options.start ?? [0, 0]
     const end = options.end ?? [width - 1, height - 1];
-    const rng = createrng(options.seed)
+    const rng = new Prando(options.seed ?? "seed");
     const m = { width, height, data, start, end };
     initializeMaze(m);
     build(m, rng);
@@ -184,13 +184,12 @@ export function generate(options: MazeOptions): MazeData {
     return m;
 }
 
-function build(m: MazeData, rng: RNG) {
+function build(m: MazeData, rng: Prando) {
     const s = [m.start];
 
     while (s.length > 0) {
         const p = s.pop() ?? [0, 0];
-        const r = rng.get();
-        const initialDirection = r % 4;
+        const initialDirection = rng.next(0, 4);
         for (let i = 0; i < 4; i++) {
             const direction = (initialDirection + i) % 4;
             const edge = 1 << direction;

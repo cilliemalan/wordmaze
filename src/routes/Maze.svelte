@@ -19,14 +19,18 @@
         maze.draw(ctx, m, 64);
     }
 
-    $: drawMaze(
-        generate({
-            width: canvasElement.width / cellSize,
-            height: canvasElement.height / cellSize,
-            seed,
-            text,
-        }),
-    );
+    $: {
+        if (canvasElement) {
+            drawMaze(
+                generate({
+                    width: canvasElement.width / cellSize,
+                    height: canvasElement.height / cellSize,
+                    seed,
+                    text,
+                }),
+            );
+        }
+    }
 </script>
 
 <canvas bind:this={canvasElement}></canvas>
