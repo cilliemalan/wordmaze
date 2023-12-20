@@ -163,7 +163,7 @@ function makeGap(m: MazeData, p: Point) {
 function initializeMaze(m: MazeData) {
     const { width, height, data, start, end } = m;
     for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; y++) {
+        for (let x = 0; x < width; x++) {
             data[y * width + x] = FILLED;
         }
     }

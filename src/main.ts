@@ -1,9 +1,16 @@
 import './style.css'
-import typescriptLogo from './typescript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.ts'
+import { generate, draw } from './maze'
 
-document.getElementById('mainlogo')?.setAttribute('src', viteLogo);
-document.getElementById('vanillalogo')?.setAttribute('src', typescriptLogo);
+const canvas = document.querySelector("canvas")!;
+const cellSize = 64;
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+debugger;
+const maze = generate({
+    width: canvas.width / cellSize,
+    height: canvas.height / cellSize,
+    seed: "123",
+    text: "Hello"
+});
+
+const ctx = canvas.getContext("2d")!;
+draw(ctx, maze, cellSize);
