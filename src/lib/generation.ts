@@ -1,3 +1,4 @@
+import { createrng, type RNG } from "./rng";
 
 export const T = 1;
 export const R = 2;
@@ -33,7 +34,7 @@ export interface MazeOptions {
     text: string;
     start?: Point;
     end?: Point;
-    seed: number;
+    seed: string;
 }
 
 function topLeft({ x, y }: Block): Point {
@@ -56,6 +57,37 @@ function constrainPoint(m: MazeData, p: Point): Point {
     return [x, y];
 }
 
+function comparePoint(a: Point, b: Point): number {
+    if (a[0] < b[0])
+        return -1;
+    if (a[0] > b[0])
+        return 1;
+    if (a[1] < b[1])
+        return -1;
+    if (a[1] > b[1])
+        return 1;
+    return 0;
+}
+
+function advance(p: Point, edge: number): Point {
+    const [x, y] = p;
+    if (edge & L) {
+        return [x - 1, y];
+    }
+    else if (edge & R) {
+        return [x + 1, y];
+    }
+    else if (edge & T) {
+        return [x, y - 1];
+    }
+    else if (edge & B) {
+        return [x, y + 1];
+    }
+    else {
+        return p;
+    }
+}
+
 function setCell(m: MazeData, p: Point, value: number) {
     const [x, y] = constrainPoint(m, p);
     m.data[y * m.height + x] = value;
@@ -70,44 +102,18 @@ function getEdge(m: MazeData, p: Point, edge: number): boolean {
     return (getCell(m, p) & edge) != 0;
 }
 
-function getAdjacentCell(m: MazeData, p: Point, edge: number) {
-    const [x, y] = p;
-    const { width, height } = m;
-    if (edge & L) {
-        if (x == 0) {
-            return 0;
-        } else {
-            return getCell(m, [x - 1, y]);
-        }
+function isInside(m: MazeData, p: Point, edge?: number): boolean {
+    if (edge !== undefined) {
+        p = advance(p, edge);
     }
-    else if (edge & R) {
-        if (x == width - 1) {
-            return 0;
-        } else {
-            return getCell(m, [x + 1, y]);
-        }
-    }
-    else if (edge & T) {
-        if (y == 0) {
-            return 0;
-        } else {
-            return getCell(m, [x, y - 1]);
-        }
-    }
-    else if (edge & B) {
-        if (x == height - 1) {
-            return 0;
-        } else {
-            return getCell(m, [x, y + 1]);
-        }
-    }
-    else {
-        return getCell(m, p);
-    }
-}
 
-function isAdjacentCellFilled(m: MazeData, p: Point, edge: number) {
-    return (getAdjacentCell(m, p, edge) & FILLED) != 0;
+    if (p[0] < 0 || p[1] << 0) {
+        return false;
+    }
+    if (p[0] >= m.width || p[1] >= m.height) {
+        return false;
+    }
+    return true;
 }
 
 function changeEdge(m: MazeData, p: Point, add: number, remove: number) {
@@ -161,9 +167,6 @@ function initializeMaze(m: MazeData) {
             data[y * width + x] = FILLED;
         }
     }
-
-    makeGap(m, m.start);
-    makeGap(m, m.end);
 }
 
 export function generate(options: MazeOptions): MazeData {
@@ -172,12 +175,67 @@ export function generate(options: MazeOptions): MazeData {
     const data = new Uint8Array(options.width * options.height);
     const start = options.start ?? [0, 0]
     const end = options.end ?? [width - 1, height - 1];
+    const rng = createrng(options.seed)
     const m = { width, height, data, start, end };
     initializeMaze(m);
-
+    build(m, rng);
+    makeGap(m, m.start);
+    makeGap(m, m.end);
     return m;
 }
 
-function build(m: MazeData) {
-    const p = m.start;
+function build(m: MazeData, rng: RNG) {
+    const s = [m.start];
+
+    while (s.length > 0) {
+        const p = s.pop() ?? [0, 0];
+        const r = rng.get();
+        const initialDirection = r % 4;
+        for (let i = 0; i < 4; i++) {
+            const direction = (initialDirection + i) % 4;
+            const edge = 1 << direction;
+            const adjacentCell = advance(p, edge);
+            if (!isInside(m, adjacentCell)) {
+                continue;
+            }
+            if (getCell(m, adjacentCell) == FILLED) {
+                removeEdge(m, p, edge);
+                s.push(adjacentCell);
+                break;
+            }
+        }
+    }
+}
+
+export function draw(ctx: CanvasRenderingContext2D, m: MazeData, cellSize: number = 64) {
+    const olw = ctx.lineWidth;
+    ctx.lineWidth = cellSize / 4;
+    const ola = ctx.lineWidth / 2;
+    const w = m.width;
+    const h = m.height;
+    for (let y = 0; y < m.height; y++) {
+        for (let x = 0; x < m.width; x++) {
+            const c = getCell(m, [x, y]);
+            if (c == FILLED) {
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+            } else {
+                if (c & T) {
+                    ctx.moveTo((x + 0) * cellSize, (y + 0) * cellSize);
+                    ctx.lineTo((x + 1) * cellSize, (y + 0) * cellSize);
+                }
+                if (c & R) {
+                    ctx.moveTo((x + 1) * cellSize, (y + 0) * cellSize);
+                    ctx.lineTo((x + 1) * cellSize, (y + 1) * cellSize);
+                }
+                if (c & B) {
+                    ctx.moveTo((x + 1) * cellSize, (y + 1) * cellSize);
+                    ctx.lineTo((x + 0) * cellSize, (y + 1) * cellSize);
+                }
+                if (c & L) {
+                    ctx.moveTo((x + 0) * cellSize, (y + 1) * cellSize);
+                    ctx.lineTo((x + 0) * cellSize, (y + 0) * cellSize);
+                }
+            }
+        }
+    }
 }
