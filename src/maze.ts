@@ -25,6 +25,7 @@ export interface MazeData {
     end: Point;
     width: number;
     height: number;
+    stride: number;
     data: Uint8Array;
 }
 
@@ -90,12 +91,12 @@ function advance(p: Point, edge: number): Point {
 
 function setCell(m: MazeData, p: Point, value: number) {
     const [x, y] = constrainPoint(m, p);
-    m.data[y * m.height + x] = value;
+    m.data[y * m.stride + x] = value;
 }
 
 function getCell(m: MazeData, p: Point): number {
     const [x, y] = constrainPoint(m, p);
-    return m.data[y * m.height + x];
+    return m.data[y * m.stride + x];
 }
 
 function getEdge(m: MazeData, p: Point, edge: number): boolean {
@@ -107,7 +108,7 @@ function isInside(m: MazeData, p: Point, edge?: number): boolean {
         p = advance(p, edge);
     }
 
-    if (p[0] < 0 || p[1] << 0) {
+    if (p[0] < 0 || p[1] < 0) {
         return false;
     }
     if (p[0] >= m.width || p[1] >= m.height) {
@@ -116,32 +117,23 @@ function isInside(m: MazeData, p: Point, edge?: number): boolean {
     return true;
 }
 
-function changeEdge(m: MazeData, p: Point, add: number, remove: number) {
-
-
+function removeEdge(m: MazeData, p: Point, edge: number) {
     const { width, height } = m;
     const [x, y] = p;
-    setCell(m, p, (getCell(m, p) | add) & (~remove));
-    if (x > 0) {
-        setCell(m, [x - 1, y], (getCell(m, p) | (add & L)) & (~(remove & L)));
+    const ee = ~edge;
+    setCell(m, p, getCell(m, p) & ee);
+    if (x > 0 && (edge & L)) {
+        setCell(m, [x - 1, y], getCell(m, [x - 1, y]) & ~R);
     }
-    if (x < width - 1) {
-        setCell(m, [x + 1, y], (getCell(m, p) | (add & R)) & (~(remove & R)));
+    if (x < width - 1 && (edge & R)) {
+        setCell(m, [x + 1, y], getCell(m, [x + 1, y]) & ~L);
     }
-    if (y > 0) {
-        setCell(m, [x, y - 1], (getCell(m, p) | (add & T)) & (~(remove & T)));
+    if (y > 0 && (edge & T)) {
+        setCell(m, [x, y - 1], getCell(m, [x, y - 1]) & ~B);
     }
-    if (y < height - 1) {
-        setCell(m, [x, y + 1], (getCell(m, p) | (add & B)) & (~(remove & B)));
+    if (y < height - 1 && (edge & B)) {
+        setCell(m, [x, y + 1], getCell(m, [x, y + 1]) & ~T);
     }
-}
-
-function removeEdge(m: MazeData, p: Point, edge: number) {
-    changeEdge(m, p, 0, edge);
-}
-
-function addEdge(m: MazeData, p: Point, edge: number) {
-    changeEdge(m, p, edge, 0);
 }
 
 function makeGap(m: MazeData, p: Point) {
@@ -161,10 +153,10 @@ function makeGap(m: MazeData, p: Point) {
 }
 
 function initializeMaze(m: MazeData) {
-    const { width, height, data, start, end } = m;
+    const { width, stride, height, data } = m;
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-            data[y * width + x] = FILLED;
+            data[y * stride + x] = FILLED;
         }
     }
 }
@@ -172,11 +164,12 @@ function initializeMaze(m: MazeData) {
 export function generate(options: MazeOptions): MazeData {
     const width = Math.min(Math.max(options.width, MIN_WIDTH), MAX_WIDTH);
     const height = Math.min(Math.max(options.height, MIN_HEIGHT), MAX_HEIGHT);
+    const stride = width;
     const data = new Uint8Array(options.width * options.height);
     const start = options.start ?? [0, 0]
     const end = options.end ?? [width - 1, height - 1];
     const rng = new Prando(options.seed ?? "seed");
-    const m = { width, height, data, start, end };
+    const m = { width, height, stride, data, start, end };
     initializeMaze(m);
     build(m, rng);
     makeGap(m, m.start);
@@ -188,8 +181,8 @@ function build(m: MazeData, rng: Prando) {
     const s = [m.start];
 
     while (s.length > 0) {
-        const p = s.pop() ?? [0, 0];
-        const initialDirection = rng.next(0, 4);
+        const p = s.pop()!;
+        const initialDirection = Math.trunc(rng.next(0, 4));
         for (let i = 0; i < 4; i++) {
             const direction = (initialDirection + i) % 4;
             const edge = 1 << direction;
@@ -198,6 +191,7 @@ function build(m: MazeData, rng: Prando) {
                 continue;
             }
             if (getCell(m, adjacentCell) == FILLED) {
+                s.push(p);
                 removeEdge(m, p, edge);
                 s.push(adjacentCell);
                 break;
@@ -206,35 +200,31 @@ function build(m: MazeData, rng: Prando) {
     }
 }
 
-export function draw(ctx: CanvasRenderingContext2D, m: MazeData, cellSize: number = 64) {
-    const olw = ctx.lineWidth;
-    ctx.lineWidth = cellSize / 4;
-    const ola = ctx.lineWidth / 2;
-    const w = m.width;
-    const h = m.height;
+export function draw(ctx: CanvasRenderingContext2D, m: MazeData) {
+    const pf = ctx.lineWidth;
+    const po = pf / 2;
+    ctx.translate(po, po);
     for (let y = 0; y < m.height; y++) {
         for (let x = 0; x < m.width; x++) {
             const c = getCell(m, [x, y]);
-            if (c == FILLED) {
-                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-            } else {
-                if (c & T) {
-                    ctx.moveTo((x + 0) * cellSize, (y + 0) * cellSize);
-                    ctx.lineTo((x + 1) * cellSize, (y + 0) * cellSize);
-                }
-                if (c & R) {
-                    ctx.moveTo((x + 1) * cellSize, (y + 0) * cellSize);
-                    ctx.lineTo((x + 1) * cellSize, (y + 1) * cellSize);
-                }
-                if (c & B) {
-                    ctx.moveTo((x + 1) * cellSize, (y + 1) * cellSize);
-                    ctx.lineTo((x + 0) * cellSize, (y + 1) * cellSize);
-                }
-                if (c & L) {
-                    ctx.moveTo((x + 0) * cellSize, (y + 1) * cellSize);
-                    ctx.lineTo((x + 0) * cellSize, (y + 0) * cellSize);
-                }
+            if (y == 0 && c & T) {
+                ctx.moveTo(x + 0 - po, y + 0);
+                ctx.lineTo(x + 1 + po, y + 0);
+            }
+            if (c & R) {
+                ctx.moveTo(x + 1, y + 0 - po);
+                ctx.lineTo(x + 1, y + 1 + po);
+            }
+            if (c & B) {
+                ctx.moveTo(x + 1 + po, y + 1);
+                ctx.lineTo(x + 0 - po, y + 1);
+            }
+            if (x == 0 && c & L) {
+                ctx.moveTo(x + 0, y + 1 + po);
+                ctx.lineTo(x + 0, y + 0 - po);
             }
         }
     }
+    ctx.stroke();
+    ctx.translate(-po, -po);
 }
