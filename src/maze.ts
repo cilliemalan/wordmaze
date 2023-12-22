@@ -133,6 +133,30 @@ function makeGap(m: MazeData, p: Point) {
     }
 }
 
+function makeEdgeGap(m: MazeData, rng: Prando, edge?: number): Point {
+    let p: Point;
+    if (!edge) {
+        edge = 1 << rng.nextInt(0, 4);
+    }
+
+    if (edge & L) {
+        p = [0, rng.nextInt(0, m.bounds.h)];
+    }
+    else if (edge & T) {
+        p = [rng.nextInt(0, m.bounds.w), 0];
+    }
+    else if (edge & R) {
+        p = [m.bounds.w - 1, rng.nextInt(0, m.bounds.h)];
+    }
+    else if (edge & B) {
+        p = [rng.nextInt(0, m.bounds.w), m.bounds.h - 1];
+    } else {
+        p = [0, 0];
+    }
+    removeEdge(m, p, edge);
+    return p;
+}
+
 function initializeMaze(m: MazeData) {
     const { w, h } = m.bounds;
     for (let y = 0; y < h; y++) {
@@ -147,40 +171,94 @@ export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
     const height = Math.min(Math.max(options.height, MIN_HEIGHT), MAX_HEIGHT);
     const stride = width;
     const data = new Uint8Array(options.width * options.height);
-    const start = options.start ?? [0, 0]
-    const end = options.end ?? [width - 1, height - 1];
     const rng = new Prando(options.seed ?? "seed");
     const bounds = { w: width, h: height, x: 0, y: 0 };
-    const m = { bounds, stride, data, start, end };
+    const m = { bounds, stride, data };
     initializeMaze(m);
+    const w2 = width / 2;
+    const h2 = height / 2;
+    m.bounds = { x: 0, y: 0, w: w2, h: h2 };
     build(m, rng);
-    makeGap(m, m.start);
-    makeGap(m, m.end);
-    return m;
+    m.bounds = { x: 0, y: 0, w: w2, h: height };
+    build(m, rng);
+    m.bounds = { x: 0, y: 0, w: width, h: height };
+    build(m, rng);
+    m.bounds = bounds;
+    const start = makeEdgeGap(m, rng, L);
+    const end = makeEdgeGap(m, rng, R);
+    // makeGap(m, m.start);
+    // makeGap(m, m.end);
+    return { ...m, start, end };
 }
 
 function build(m: MazeData, rng: Prando) {
-    const start: Point = [
-        Math.trunc(rng.next(0, m.bounds.w)),
-        Math.trunc(rng.next(0, m.bounds.h))
-    ];
-    const s = [start];
 
-    while (s.length > 0) {
-        const p = s.pop()!;
-        const initialDirection = Math.trunc(rng.next(0, 4));
-        for (let i = 0; i < 4; i++) {
-            const direction = (initialDirection + i) % 4;
-            const edge = 1 << direction;
-            const adjacentCell = advance(p, edge);
-            if (!isInside(m, adjacentCell)) {
-                continue;
+    function findStart(): Point | undefined {
+        const filleds = new Array<Point>();
+        const adjacents = new Array<Point>();
+
+        for (let y = 0; y < m.bounds.h; y++) {
+            for (let x = 0; x < m.bounds.w; x++) {
+                const p: Point = [x, y];
+                const c = getCell(m, p);
+                if (c != FILLED) {
+                    continue;
+                }
+
+                const cl = advance(p, L);
+                const cr = advance(p, R);
+                const ct = advance(p, T);
+                const cb = advance(p, B);
+
+                if (isInside(m, cl) && (getCell(m, cl) != FILLED)) {
+                    adjacents.push(cl);
+                }
+                if (isInside(m, cr) && (getCell(m, cr) != FILLED)) {
+                    adjacents.push(cl);
+                }
+                if (isInside(m, ct) && (getCell(m, ct) != FILLED)) {
+                    adjacents.push(ct);
+                }
+                if (isInside(m, cb) && (getCell(m, cb) != FILLED)) {
+                    adjacents.push(cb);
+                }
+
+                filleds.push(p);
             }
-            if (getCell(m, adjacentCell) == FILLED) {
-                s.push(p);
-                removeEdge(m, p, edge);
-                s.push(adjacentCell);
-                break;
+        }
+
+        if (adjacents.length != 0) {
+            return adjacents[rng.nextInt(0, adjacents.length)];
+        }
+        if (filleds.length != 0) {
+            return filleds[rng.nextInt(0, filleds.length)];
+        }
+        return undefined;
+    }
+
+    for (; ;) {
+        const start = findStart();
+        if (!start) {
+            break;
+        }
+        const s = [start];
+
+        while (s.length > 0) {
+            const p = s.pop()!;
+            const initialDirection = rng.nextInt(0, 4);
+            for (let i = 0; i < 4; i++) {
+                const direction = (initialDirection + i) % 4;
+                const edge = 1 << direction;
+                const adjacentCell = advance(p, edge);
+                if (!isInside(m, adjacentCell)) {
+                    continue;
+                }
+                if (getCell(m, adjacentCell) == FILLED) {
+                    s.push(p);
+                    removeEdge(m, p, edge);
+                    s.push(adjacentCell);
+                    break;
+                }
             }
         }
     }

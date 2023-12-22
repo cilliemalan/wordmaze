@@ -13,7 +13,7 @@ function generateMaze() {
     maze = generate({
         width: mazew,
         height: mazeh,
-        seed: "123",
+        seed: Math.random().toString(),
         text: "Hello"
     });
 }
