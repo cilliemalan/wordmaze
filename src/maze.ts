@@ -178,11 +178,11 @@ export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
     const w2 = width / 2;
     const h2 = height / 2;
     m.bounds = { x: 0, y: 0, w: w2, h: h2 };
-    build(m, rng);
+    buildRandomizedDepthFirst(m, rng);
     m.bounds = { x: 0, y: 0, w: w2, h: height };
-    build(m, rng);
+    buildRandomizedDepthFirst(m, rng);
     m.bounds = { x: 0, y: 0, w: width, h: height };
-    build(m, rng);
+    buildRandomizedDepthFirst(m, rng);
     m.bounds = bounds;
     const start = makeEdgeGap(m, rng, L);
     const end = makeEdgeGap(m, rng, R);
@@ -191,7 +191,58 @@ export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
     return { ...m, start, end };
 }
 
-function build(m: MazeData, rng: Prando) {
+function buildWilsons(m: MazeData, rng: Prando) {
+
+    const maze = new PointSet();
+    const filleds = new PointSet();
+
+    // initialize sets of spaces
+    for (let y = 0; y < m.bounds.h; y++) {
+        for (let x = 0; x < m.bounds.w; x++) {
+            const p: Point = [x, y];
+            const c = getCell(m, p);
+            if (c == FILLED) {
+                filleds.add(p);
+            } else {
+                maze.add(p);
+            }
+        }
+    }
+
+    while (filleds.length != 0) {
+        const walk = new PointSet();
+        let p = filleds.at(rng.nextInt(0, filleds.length));
+        let pp = p;
+
+        for (; ;) {
+            let direction = 1 << rng.next(0, 4);
+            let np = advance(p, direction);
+            while (!isInside(m, p, direction) || (pp[0] == np[0] && pp[1] == np[1])) {
+                direction = (direction + 1) % 4;
+                np = advance(p, direction);
+            }
+
+            // loop. Remove the loop.
+            if (walk.has(np)) {
+                walk.removeAfter(np);
+                continue;
+            }
+
+            walk.add(np);
+            pp = p;
+            p = np;
+
+            // we have found the maze
+            if (maze.has(np)) {
+                for (let i = 1; i < walk.length; i++) {
+                    const p = walk.at(i);
+                }
+            }
+        }
+    }
+}
+
+function buildRandomizedDepthFirst(m: MazeData, rng: Prando) {
 
     function findStart(): Point | undefined {
         const filleds = new Array<Point>();
@@ -385,4 +436,74 @@ export function drawSolution(ctx: CanvasRenderingContext2D, m: MazeDataWithStart
     }
     ctx.stroke();
     ctx.translate(-po, -po);
+}
+
+class PointSet {
+    set = new Map<number, number>();
+    array = new Array<number>();
+
+    add(p: Point) {
+        const n = this.#pspec(p);
+        if (this.set.has(n)) {
+            return false;
+        }
+        this.set.set(n, this.array.length);
+        this.array.push(n);
+        return true;
+    }
+
+    remove(p: Point) {
+        const n = this.#pspec(p);
+        const ix = this.set.get(n);
+        if (ix === undefined) {
+            return false;
+        }
+
+        this.set.delete(n);
+        this.array.splice(ix, 1);
+        return true;
+    }
+
+    has(p: Point) {
+        const n = this.#pspec(p);
+        return this.set.has(n);
+    }
+
+    removeAfter(p: Point) {
+        const n = this.#pspec(p);
+        const ix = this.set.get(n);
+        if (ix === undefined) {
+            return;
+        }
+
+        const cnt = this.array.length - ix - 1;
+        const deleted = this.array.splice(ix, cnt);
+        for (let i = 0; i < deleted.length; i++) {
+            const n = deleted[i];
+            this.set.delete(n);
+        }
+
+        return cnt;
+    }
+
+    get length() {
+        return this.array.length;
+    }
+
+    at(index: number): Point {
+        if (index >= this.array.length || index < 0) {
+            return [0, 0];
+        }
+
+        const n = this.array[index];
+        return this.#unspec(n);
+    }
+
+    #pspec(p: Point) {
+        return p[0] << 16 | p[1];
+    }
+
+    #unspec(n: number): Point {
+        return [n >> 16, n & 0xffff];
+    }
 }
