@@ -7,6 +7,7 @@ const ctx = canvas.getContext("2d")!;
 const mazew = 64;
 const mazeh = 32;
 let points: Point[] = [];
+let isFullScreen = false;
 
 const image = Uint8Array.from([
     0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -148,8 +149,15 @@ function move(edge: number) {
         points.push(np);
         drawMaze(maze);
     }
-}
 
+    if (!isFullScreen) {
+        canvas.requestFullscreen();
+        isFullScreen = true;
+    }
+}
+canvas.addEventListener('dblclick', () => {
+    canvas.requestFullscreen();
+});
 function up() { move(T); }
 function left() { move(L); }
 function down() { move(B); }
