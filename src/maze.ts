@@ -24,6 +24,7 @@ export interface MazeData {
     data: Uint8Array;
     stride: number;
     bounds: Block;
+    mask?: Uint8Array;
 }
 
 export interface MazeDataWithStartAndEnd
@@ -40,6 +41,7 @@ export interface MazeOptions {
     start?: Point;
     end?: Point;
     seed: string;
+    image?: Uint8Array;
     drawfn?: (m: MazeData) => void;
 }
 
@@ -81,6 +83,21 @@ function getCell(m: MazeData, p: Point): number {
     return m.data[cellAddress(m, p)];
 }
 
+function getMaskValue(m: MazeData, p: Point): boolean {
+
+    if (m.mask) {
+        const bb = cellAddress(m, p);
+        const byte = Math.trunc(bb / 8);
+        const bit = 7 - (bb % 8);
+        const mv = !!((m.mask[byte] >> bit) & 1);
+        if (mv) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function isInside(m: MazeData, p: Point, edge?: number): boolean {
     if (edge !== undefined) {
         return isInside(m, advance(p, edge), undefined);
@@ -96,6 +113,11 @@ function isInside(m: MazeData, p: Point, edge?: number): boolean {
     if (x >= w || y >= h) {
         return false;
     }
+
+    if (!getMaskValue(m, p)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -174,8 +196,10 @@ export async function generate(options: MazeOptions): Promise<MazeDataWithStartA
     const data = new Uint8Array(options.width * options.height);
     const rng = new Prando(options.seed ?? "seed");
     const bounds = { w: width, h: height, x: 0, y: 0 };
-    const m = { bounds, stride, data };
+    const m = { bounds, stride, data, mask: options.image };
     initializeMaze(m);
+    buildRandomizedDepthFirst(m, rng);
+    m.mask = undefined;
     await buildWilsons(m, rng, options);
 
     const start: Point = [0, 0];
@@ -195,7 +219,7 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
         for (let x = 0; x < m.bounds.w; x++) {
             const p: Point = [x, y];
             const c = getCell(m, p);
-            if (c == FILLED) {
+            if (isInside(m, p) && c == FILLED) {
                 filleds.add(p);
             } else {
                 maze.add(p);
@@ -229,10 +253,20 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
         for (let i = 0; i < 100000; i++) {
             let rdir = rng.nextInt(0, 3);
 
-            let np = advance(p, 1 << rdir);
-            while (!isInside(m, np) || (pp[0] == np[0] && pp[1] == np[1])) {
+            let np: Point = [0, 0];
+            let j = 0;
+            for (j = 0; j < 5; j++) {
                 rdir = (rdir + 1) % 4;
                 np = advance(p, 1 << rdir);
+
+                if ((pp[0] != np[0] || pp[1] != np[1]) &&
+                    isInside(m, np)) {
+                    break;
+                }
+
+                if (j >= 4) {
+                    debugger;
+                }
             }
 
             if (walk.has(np)) {
@@ -243,7 +277,9 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
 
             walk.add(np);
             //console.log(walk.debugstr);
-            console.assert(walk.isContiguous());
+            if (!walk.isContiguous()) {
+                debugger;
+            }
 
             pp = p;
             p = np;
@@ -263,6 +299,8 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
                         removeEdge(m, p, B);
                     } else {
                         console.error("invalid walk");
+                        debugger;
+                        break;
                     }
                     const hasAdded = maze.add(pp);
                     console.assert(hasAdded);
@@ -283,75 +321,55 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
 
 function buildRandomizedDepthFirst(m: MazeData, rng: Prando) {
 
-    function findStart(): Point | undefined {
-        const filleds = new Array<Point>();
-        const adjacents = new Array<Point>();
-
-        for (let y = 0; y < m.bounds.h; y++) {
-            for (let x = 0; x < m.bounds.w; x++) {
-                const p: Point = [x, y];
-                const c = getCell(m, p);
-                if (c != FILLED) {
-                    continue;
-                }
-
-                const cl = advance(p, L);
-                const cr = advance(p, R);
-                const ct = advance(p, T);
-                const cb = advance(p, B);
-
-                if (isInside(m, cl) && (getCell(m, cl) != FILLED)) {
-                    adjacents.push(cl);
-                }
-                if (isInside(m, cr) && (getCell(m, cr) != FILLED)) {
-                    adjacents.push(cl);
-                }
-                if (isInside(m, ct) && (getCell(m, ct) != FILLED)) {
-                    adjacents.push(ct);
-                }
-                if (isInside(m, cb) && (getCell(m, cb) != FILLED)) {
-                    adjacents.push(cb);
-                }
-
-                filleds.push(p);
-            }
+    const start: Point = [0, 0];
+    while (!isInside(m, start)) {
+        start[0] = start[0] + 1;
+        if (start[0] > m.bounds.w) {
+            start[1] = start[1] + 1;
+            start[0] = 0;
         }
-
-        if (adjacents.length != 0) {
-            return adjacents[rng.nextInt(0, adjacents.length - 1)];
-        }
-        if (filleds.length != 0) {
-            return filleds[rng.nextInt(0, filleds.length - 1)];
-        }
-        return undefined;
     }
 
-    for (; ;) {
-        const start = findStart();
-        if (!start) {
-            break;
-        }
-        const s = [start];
+    const s = [start];
 
-        while (s.length > 0) {
-            const p = s.pop()!;
-            const initialDirection = rng.nextInt(0, 3);
-            for (let i = 0; i < 4; i++) {
-                const direction = (initialDirection + i) % 4;
-                const edge = 1 << direction;
-                const adjacentCell = advance(p, edge);
-                if (!isInside(m, adjacentCell)) {
-                    continue;
-                }
-                if (getCell(m, adjacentCell) == FILLED) {
-                    s.push(p);
-                    removeEdge(m, p, edge);
-                    s.push(adjacentCell);
-                    break;
-                }
+    while (s.length > 0) {
+        const p = s.pop()!;
+        const initialDirection = rng.nextInt(0, 3);
+        for (let i = 0; i < 4; i++) {
+            const direction = (initialDirection + i) % 4;
+            const edge = 1 << direction;
+            const adjacentCell = advance(p, edge);
+            if (!isInside(m, adjacentCell)) {
+                continue;
+            }
+            if (getCell(m, adjacentCell) == FILLED) {
+                s.push(p);
+                removeEdge(m, p, edge);
+                s.push(adjacentCell);
+                break;
             }
         }
     }
+}
+
+function buildAsLongAsPossible(m: MazeData, rng: Prando) {
+    const odata = m.data;
+    let longestLen = 0;
+    let longestdata = m.data;
+    let mm = m as MazeDataWithStartAndEnd;
+    mm.start = [0, 0];
+    mm.end = [m.bounds.w - 1, m.bounds.h - 1];
+    for (let i = 0; i < 100; i++) {
+        m.data = Uint8Array.from(odata);
+        buildRandomizedDepthFirst(m, rng);
+        const l = solve(m, [0, 0], [m.bounds.w - 1, m.bounds.h - 1])?.length ?? 0;
+        if (l > longestLen) {
+            longestLen = l;
+            longestdata = m.data;
+        }
+    }
+
+    m.data = longestdata;
 }
 
 function solve(m: MazeData, start: Point, end: Point): Point[] | undefined {
@@ -481,6 +499,11 @@ class PointSet {
     array = new Array<number>();
 
     add(p: Point) {
+        if (p[0] < 0 || p[0] >= 65536 ||
+            p[1] < 0 || p[1] >= 65536) {
+            debugger;
+            return false;
+        }
         const n = this.#pspec(p);
         if (this.array.indexOf(n) != -1) {
             return false;
@@ -492,7 +515,6 @@ class PointSet {
     remove(p: Point) {
         const n = this.#pspec(p);
         const ix = this.array.indexOf(n);
-        console.assert(ix >= 0);
         if (ix == -1) {
             return false;
         }
