@@ -40,6 +40,7 @@ export interface MazeOptions {
     start?: Point;
     end?: Point;
     seed: string;
+    drawfn?: (m: MazeData) => void;
 }
 
 function constrainPoint(m: MazeData, p: Point): Point {
@@ -136,20 +137,20 @@ function makeGap(m: MazeData, p: Point) {
 function makeEdgeGap(m: MazeData, rng: Prando, edge?: number): Point {
     let p: Point;
     if (!edge) {
-        edge = 1 << rng.nextInt(0, 4);
+        edge = 1 << rng.nextInt(0, 3);
     }
 
     if (edge & L) {
-        p = [0, rng.nextInt(0, m.bounds.h)];
+        p = [0, rng.nextInt(0, m.bounds.h - 1)];
     }
     else if (edge & T) {
-        p = [rng.nextInt(0, m.bounds.w), 0];
+        p = [rng.nextInt(0, m.bounds.w - 1), 0];
     }
     else if (edge & R) {
-        p = [m.bounds.w - 1, rng.nextInt(0, m.bounds.h)];
+        p = [m.bounds.w - 1, rng.nextInt(0, m.bounds.h - 1)];
     }
     else if (edge & B) {
-        p = [rng.nextInt(0, m.bounds.w), m.bounds.h - 1];
+        p = [rng.nextInt(0, m.bounds.w - 1), m.bounds.h - 1];
     } else {
         p = [0, 0];
     }
@@ -166,7 +167,7 @@ function initializeMaze(m: MazeData) {
     }
 }
 
-export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
+export async function generate(options: MazeOptions): Promise<MazeDataWithStartAndEnd> {
     const width = Math.min(Math.max(options.width, MIN_WIDTH), MAX_WIDTH);
     const height = Math.min(Math.max(options.height, MIN_HEIGHT), MAX_HEIGHT);
     const stride = width;
@@ -175,23 +176,16 @@ export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
     const bounds = { w: width, h: height, x: 0, y: 0 };
     const m = { bounds, stride, data };
     initializeMaze(m);
-    const w2 = width / 2;
-    const h2 = height / 2;
-    m.bounds = { x: 0, y: 0, w: w2, h: h2 };
-    buildRandomizedDepthFirst(m, rng);
-    m.bounds = { x: 0, y: 0, w: w2, h: height };
-    buildRandomizedDepthFirst(m, rng);
-    m.bounds = { x: 0, y: 0, w: width, h: height };
-    buildRandomizedDepthFirst(m, rng);
-    m.bounds = bounds;
-    const start = makeEdgeGap(m, rng, L);
-    const end = makeEdgeGap(m, rng, R);
-    // makeGap(m, m.start);
-    // makeGap(m, m.end);
+    await buildWilsons(m, rng, options);
+
+    const start: Point = [0, 0];
+    const end: Point = [width - 1, height - 1];
+    makeGap(m, start);
+    makeGap(m, end);
     return { ...m, start, end };
 }
 
-function buildWilsons(m: MazeData, rng: Prando) {
+async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
 
     const maze = new PointSet();
     const filleds = new PointSet();
@@ -209,35 +203,80 @@ function buildWilsons(m: MazeData, rng: Prando) {
         }
     }
 
+    // if the maze is blank, add a random section
+    // and build the maze.
+    if (maze.length == 0) {
+        const p: Point = [
+            rng.nextInt(1, m.bounds.w - 2),
+            rng.nextInt(1, m.bounds.h - 2)];
+        const edge = 1 << rng.nextInt(0, 3);
+        removeEdge(m, p, edge);
+
+        return await buildWilsons(m, rng, options);
+    }
+
+
     while (filleds.length != 0) {
         const walk = new PointSet();
-        let p = filleds.at(rng.nextInt(0, filleds.length));
+        let p = filleds.at(rng.nextInt(0, filleds.length - 1));
+        walk.add(p);
         let pp = p;
+        let hasWalked = false;
 
-        for (; ;) {
-            let direction = 1 << rng.next(0, 4);
-            let np = advance(p, direction);
-            while (!isInside(m, p, direction) || (pp[0] == np[0] && pp[1] == np[1])) {
-                direction = (direction + 1) % 4;
-                np = advance(p, direction);
+        options.drawfn?.(m);
+        await delay(1);
+
+        for (let i = 0; i < 100000; i++) {
+            let rdir = rng.nextInt(0, 3);
+
+            let np = advance(p, 1 << rdir);
+            while (!isInside(m, np) || (pp[0] == np[0] && pp[1] == np[1])) {
+                rdir = (rdir + 1) % 4;
+                np = advance(p, 1 << rdir);
             }
 
-            // loop. Remove the loop.
             if (walk.has(np)) {
+                // loop. Remove the loop.
+                // console.log(`loop! [${np[0]},${np[1]}] is at index ${walk.indexOf(np)}`);
                 walk.removeAfter(np);
-                continue;
             }
 
             walk.add(np);
+            //console.log(walk.debugstr);
+            console.assert(walk.isContiguous());
+
             pp = p;
             p = np;
 
-            // we have found the maze
             if (maze.has(np)) {
+                // we have found the maze. np is inside the maze
                 for (let i = 1; i < walk.length; i++) {
                     const p = walk.at(i);
+                    const pp = walk.at(i - 1);
+                    if (pp[0] == p[0] - 1) {
+                        removeEdge(m, p, L);
+                    } else if (pp[1] == p[1] - 1) {
+                        removeEdge(m, p, T);
+                    } else if (pp[0] == p[0] + 1) {
+                        removeEdge(m, p, R);
+                    } else if (pp[1] == p[1] + 1) {
+                        removeEdge(m, p, B);
+                    } else {
+                        console.error("invalid walk");
+                    }
+                    const hasAdded = maze.add(pp);
+                    console.assert(hasAdded);
+                    const hasRemoved = filleds.remove(pp);
+                    console.assert(hasRemoved);
                 }
+                hasWalked = true;
+                break;
             }
+        }
+
+        if (!hasWalked) {
+            console.error('Could not walk');
+            return;
         }
     }
 }
@@ -279,10 +318,10 @@ function buildRandomizedDepthFirst(m: MazeData, rng: Prando) {
         }
 
         if (adjacents.length != 0) {
-            return adjacents[rng.nextInt(0, adjacents.length)];
+            return adjacents[rng.nextInt(0, adjacents.length - 1)];
         }
         if (filleds.length != 0) {
-            return filleds[rng.nextInt(0, filleds.length)];
+            return filleds[rng.nextInt(0, filleds.length - 1)];
         }
         return undefined;
     }
@@ -296,7 +335,7 @@ function buildRandomizedDepthFirst(m: MazeData, rng: Prando) {
 
         while (s.length > 0) {
             const p = s.pop()!;
-            const initialDirection = rng.nextInt(0, 4);
+            const initialDirection = rng.nextInt(0, 3);
             for (let i = 0; i < 4; i++) {
                 const direction = (initialDirection + i) % 4;
                 const edge = 1 << direction;
@@ -439,64 +478,95 @@ export function drawSolution(ctx: CanvasRenderingContext2D, m: MazeDataWithStart
 }
 
 class PointSet {
-    set = new Map<number, number>();
     array = new Array<number>();
 
     add(p: Point) {
         const n = this.#pspec(p);
-        if (this.set.has(n)) {
+        if (this.array.indexOf(n) != -1) {
             return false;
         }
-        this.set.set(n, this.array.length);
         this.array.push(n);
         return true;
     }
 
     remove(p: Point) {
         const n = this.#pspec(p);
-        const ix = this.set.get(n);
-        if (ix === undefined) {
+        const ix = this.array.indexOf(n);
+        console.assert(ix >= 0);
+        if (ix == -1) {
             return false;
         }
-
-        this.set.delete(n);
-        this.array.splice(ix, 1);
+        const spliced = this.array.splice(ix, 1);
+        console.assert(spliced.length == 1);
         return true;
     }
 
     has(p: Point) {
+        return this.indexOf(p) != -1;
+    }
+
+    indexOf(p: Point) {
         const n = this.#pspec(p);
-        return this.set.has(n);
+        const ix = this.array.indexOf(n);
+        return ix;
+    }
+
+    at(index: number): Point {
+        console.assert(index >= 0 && index < this.array.length);
+        return this.#unspec(this.array[index]);
     }
 
     removeAfter(p: Point) {
         const n = this.#pspec(p);
-        const ix = this.set.get(n);
-        if (ix === undefined) {
-            return;
+        const ix = this.array.indexOf(n);
+        console.assert(ix != -1);
+        if (ix == -1) {
+            return 0;
         }
 
-        const cnt = this.array.length - ix - 1;
-        const deleted = this.array.splice(ix, cnt);
-        for (let i = 0; i < deleted.length; i++) {
-            const n = deleted[i];
-            this.set.delete(n);
-        }
-
-        return cnt;
+        const deleted = this.array.splice(ix);
+        return deleted.length;
     }
 
     get length() {
         return this.array.length;
     }
 
-    at(index: number): Point {
-        if (index >= this.array.length || index < 0) {
-            return [0, 0];
+    get debugstr() {
+        if (this.array.length == 0) {
+            return "<empty>";
         }
 
-        const n = this.array[index];
-        return this.#unspec(n);
+        let s = "";
+        for (let i = 0; i < this.array.length; i++) {
+            const p = this.#unspec(this.array[i]);
+            s += `[${p[0]},${p[1]}] `;
+        }
+        return s;
+    }
+
+    isContiguous(): boolean {
+        if (this.array.length <= 1) {
+            return true;
+        }
+
+        for (let i = 1; i < this.array.length; i++) {
+            const p = this.#unspec(this.array[i]);
+            const q = this.#unspec(this.array[i - 1]);
+            if (p[0] == q[0] && p[1] == q[1]) {
+                return false;
+            }
+            const joined = (
+                (p[0] == q[0] - 1 && p[1] == q[1]) ||
+                (p[0] == q[0] + 1 && p[1] == q[1]) ||
+                (p[0] == q[0] && p[1] == q[1] - 1) ||
+                (p[0] == q[0] && p[1] == q[1] + 1));
+            if (!joined) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     #pspec(p: Point) {
@@ -506,4 +576,8 @@ class PointSet {
     #unspec(n: number): Point {
         return [n >> 16, n & 0xffff];
     }
+}
+
+function delay(n: number) {
+    return new Promise(resolve => setTimeout(resolve, n));
 }

@@ -4,25 +4,28 @@ import { generate, draw, type MazeData, drawSolution, MazeDataWithStartAndEnd } 
 const canvas = document.querySelector("canvas")!;
 const ctx = canvas.getContext("2d")!;
 
-const mazew = 60;
-const mazeh = 30;
+const mazew = 64;
+const mazeh = 32;
 
 let maze: MazeDataWithStartAndEnd;
 
-function generateMaze() {
-    maze = generate({
+async function generateMaze() {
+    maze = await generate({
         width: mazew,
         height: mazeh,
         seed: Math.random().toString(),
-        text: "Hello"
+        text: "Hello",
+        drawfn: drawMaze
     });
+    drawMaze(maze);
 }
 
-function drawMaze() {
+function drawMaze(maze: MazeData) {
     const w = innerWidth;
     const h = innerHeight;
-    const mw = maze.bounds.w;
-    const mh = maze.bounds.h;
+    const mw = maze.stride
+    const mh = maze.data.length / mw;
+    maze = { ...maze, bounds: { x: 0, y: 0, w: mw, h: mh } };
     canvas.width = w;
     canvas.height = h;
 
@@ -47,14 +50,16 @@ function drawMaze() {
 
     ctx.strokeStyle = "rgb(0,0,255)";
     ctx.lineWidth = 0.25;
-    drawSolution(ctx, maze);
+    const mse = maze as MazeDataWithStartAndEnd;
+    if (mse.start && mse.end) {
+        drawSolution(ctx, mse);
+    }
 }
 
 addEventListener('resize', () => {
-    drawMaze();
+    drawMaze(maze);
 });
 
 addEventListener('load', () => {
     generateMaze();
-    drawMaze();
 });
