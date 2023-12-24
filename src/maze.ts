@@ -45,13 +45,7 @@ export interface MazeOptions {
     drawfn?: (m: MazeData) => void;
 }
 
-function constrainPoint(m: MazeData, p: Point): Point {
-    const x = Math.max(Math.min(m.bounds.w - 1, p[0]), 0);
-    const y = Math.max(Math.min(m.bounds.h - 1, p[1]), 0);
-    return [x, y];
-}
-
-function advance(p: Point, edge: number): Point {
+export function advance(p: Point, edge: number): Point {
     const [x, y] = p;
     if (edge & L) {
         return [x - 1, y];
@@ -75,11 +69,11 @@ function cellAddress(m: MazeData, p: Point) {
     return (y + m.bounds.y) * m.stride + x + m.bounds.x;
 }
 
-function setCell(m: MazeData, p: Point, value: number) {
+export function setCell(m: MazeData, p: Point, value: number) {
     m.data[cellAddress(m, p)] = value;
 }
 
-function getCell(m: MazeData, p: Point): number {
+export function getCell(m: MazeData, p: Point): number {
     return m.data[cellAddress(m, p)];
 }
 
@@ -98,7 +92,7 @@ function getMaskValue(m: MazeData, p: Point): boolean {
     return true;
 }
 
-function isInside(m: MazeData, p: Point, edge?: number): boolean {
+export function isInside(m: MazeData, p: Point, edge?: number): boolean {
     if (edge !== undefined) {
         return isInside(m, advance(p, edge), undefined);
     }
@@ -156,30 +150,6 @@ function makeGap(m: MazeData, p: Point) {
     }
 }
 
-function makeEdgeGap(m: MazeData, rng: Prando, edge?: number): Point {
-    let p: Point;
-    if (!edge) {
-        edge = 1 << rng.nextInt(0, 3);
-    }
-
-    if (edge & L) {
-        p = [0, rng.nextInt(0, m.bounds.h - 1)];
-    }
-    else if (edge & T) {
-        p = [rng.nextInt(0, m.bounds.w - 1), 0];
-    }
-    else if (edge & R) {
-        p = [m.bounds.w - 1, rng.nextInt(0, m.bounds.h - 1)];
-    }
-    else if (edge & B) {
-        p = [rng.nextInt(0, m.bounds.w - 1), m.bounds.h - 1];
-    } else {
-        p = [0, 0];
-    }
-    removeEdge(m, p, edge);
-    return p;
-}
-
 function initializeMaze(m: MazeData) {
     const { w, h } = m.bounds;
     for (let y = 0; y < h; y++) {
@@ -189,7 +159,7 @@ function initializeMaze(m: MazeData) {
     }
 }
 
-export async function generate(options: MazeOptions): Promise<MazeDataWithStartAndEnd> {
+export function generate(options: MazeOptions): MazeDataWithStartAndEnd {
     const width = Math.min(Math.max(options.width, MIN_WIDTH), MAX_WIDTH);
     const height = Math.min(Math.max(options.height, MIN_HEIGHT), MAX_HEIGHT);
     const stride = width;
@@ -200,7 +170,7 @@ export async function generate(options: MazeOptions): Promise<MazeDataWithStartA
     initializeMaze(m);
     buildRandomizedDepthFirst(m, rng);
     m.mask = undefined;
-    await buildWilsons(m, rng, options);
+    buildWilsons(m, rng, options);
 
     const start: Point = [0, 0];
     const end: Point = [width - 1, height - 1];
@@ -209,7 +179,7 @@ export async function generate(options: MazeOptions): Promise<MazeDataWithStartA
     return { ...m, start, end };
 }
 
-async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
+function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
 
     const maze = new PointSet();
     const filleds = new PointSet();
@@ -236,7 +206,7 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
         const edge = 1 << rng.nextInt(0, 3);
         removeEdge(m, p, edge);
 
-        return await buildWilsons(m, rng, options);
+        return buildWilsons(m, rng, options);
     }
 
 
@@ -246,9 +216,6 @@ async function buildWilsons(m: MazeData, rng: Prando, options: MazeOptions) {
         walk.add(p);
         let pp = p;
         let hasWalked = false;
-
-        options.drawfn?.(m);
-        await delay(1);
 
         for (let i = 0; i < 100000; i++) {
             let rdir = rng.nextInt(0, 3);
@@ -352,27 +319,7 @@ function buildRandomizedDepthFirst(m: MazeData, rng: Prando) {
     }
 }
 
-function buildAsLongAsPossible(m: MazeData, rng: Prando) {
-    const odata = m.data;
-    let longestLen = 0;
-    let longestdata = m.data;
-    let mm = m as MazeDataWithStartAndEnd;
-    mm.start = [0, 0];
-    mm.end = [m.bounds.w - 1, m.bounds.h - 1];
-    for (let i = 0; i < 100; i++) {
-        m.data = Uint8Array.from(odata);
-        buildRandomizedDepthFirst(m, rng);
-        const l = solve(m, [0, 0], [m.bounds.w - 1, m.bounds.h - 1])?.length ?? 0;
-        if (l > longestLen) {
-            longestLen = l;
-            longestdata = m.data;
-        }
-    }
-
-    m.data = longestdata;
-}
-
-function solve(m: MazeData, start: Point, end: Point): Point[] | undefined {
+export function solve(m: MazeData, start: Point, end: Point): Point[] | undefined {
     interface VisitPoint {
         point: Point;
         parent?: VisitPoint;
@@ -476,26 +423,24 @@ export function draw(ctx: CanvasRenderingContext2D, m: MazeData) {
     ctx.translate(-po, -po);
 }
 
-export function drawSolution(ctx: CanvasRenderingContext2D, m: MazeDataWithStartAndEnd) {
-    const solution = solve(m, m.start, m.end);
-    if (!solution || !solution.length) {
+export function drawMazeLine(ctx: CanvasRenderingContext2D, pts: Point[]) {
+    if (pts.length <= 1) {
         return;
     }
 
-    const pf = ctx.lineWidth;
     const po = 0.75;
     ctx.translate(po, po);
     ctx.beginPath();
-    ctx.moveTo(solution[0][0], solution[0][1]);
-    for (let i = 0; i < solution.length; i++) {
-        const p = solution[i];
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
         ctx.lineTo(p[0], p[1]);
     }
     ctx.stroke();
     ctx.translate(-po, -po);
 }
 
-class PointSet {
+export class PointSet {
     array = new Array<number>();
 
     add(p: Point) {
@@ -598,8 +543,4 @@ class PointSet {
     #unspec(n: number): Point {
         return [n >> 16, n & 0xffff];
     }
-}
-
-function delay(n: number) {
-    return new Promise(resolve => setTimeout(resolve, n));
 }
